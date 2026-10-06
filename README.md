@@ -52,7 +52,7 @@ Also in this repo:
 
 | Path | Note |
 |---|---|
-| `fix_punctuator.py` | patches the *already deployed* schema artifacts on the phone |
+| `check.py` | read-only: verifies the phone's config matches this repo |
 | `ref/` | stock Trime files, kept as the baseline for patch simulation |
 | `AGENT_COMMENT.md` | **the long-form notes**: patch semantics, dead preset keys, why things are the way they are |
 | `deploy.sh` | back up the phone's current files, then push |
@@ -66,9 +66,10 @@ Also in this repo:
 
 Then on the phone: **Trime app → theme `預設` → the ↻ icon in the top bar (Deploy)**.
 
-> The ↻ button runs a *full* deploy (rebuilds schemas). Tapping around in the
-> settings instead only refreshes the theme, which is why punctuation changes
-> sometimes need `fix_punctuator.py` as well. Details in `AGENT_COMMENT.md`.
+> The `*.custom.yaml` files take effect **at runtime** (Rime re-reads
+> `<id>.custom.yaml` whenever a config is opened), so a schema *rebuild* is not
+> required. Details, and why you should never hand-edit `build/`, in
+> `AGENT_COMMENT.md`.
 
 ## Reading order
 

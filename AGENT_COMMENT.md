@@ -21,7 +21,7 @@ Trime 源码（`app/src/main/java/...`）与 librime 源码（`src/rime/gear/...
 | `luna_pinyin_simp.custom.yaml` | 同上，给简化字方案 |
 | `ref/` | 从手机拉下来的同文预设文件，**只作参考，不要改**；也是离线模拟 patch 的基线 |
 | `deploy.sh` | 备份 + 推送 4 个文件 |
-| `fix_punctuator.py` | 直接修补手机上已部署的 schema 产物（见下文） |
+| `check.py` | 只读检查器：核对手机上的配置与本仓库是否一致 |
 | `backup/` `pic/` | 已 gitignore：前者是 deploy 快照，后者是设计参考截图 |
 
 ```bash
@@ -54,17 +54,17 @@ adb shell head -12 $R/build/luna_pinyin.schema.yaml
 #   __build_info.timestamps 里 luna_pinyin.custom 变成非 0 = 补丁被吃进去了
 ```
 
-如果 schema 没重建，标点补丁就不会生效。这种情况用 `fix_punctuator.py`
-直接改已部署的产物（立即生效，不需要部署）：
+标点/开关/simplifier 这些改动走 `<schema>.custom.yaml`，**运行时**就生效，
+不需要 schema 重建。核对配置有没有推上去用 `check.py`：
 
 ```bash
-python3 fix_punctuator.py --check   # 只看命中多少处
-python3 fix_punctuator.py           # 写回手机
+python3 check.py            # 核对四个配置文件 + 报告部署状态
+python3 check.py --quiet    # 只说不一致的地方
 ```
 
 ---
 
-## 踩过的四个坑
+## 踩过的六个坑
 
 ### 一、`patch:` 是「整块替换」，不是深合并
 
@@ -162,6 +162,77 @@ preset_keys/copy_via_cut: {label: 复制, text: "{Control+x}{Control+z}"}   # �
 或者干脆去掉 `c` 的长按，复制用 `x`（剪切）+ `v`（粘贴）两步。
 
 ---
+
+### 五、同文的 luna 方案缺 `simplifier:` 配置 —— 简繁一开就零候选
+
+**症状**：中文输入时预编辑区正常显示拼音，但**候选栏永远是空的**（一直停在工具栏状态）。
+把「简繁」从「简体」切成「繁体」，候选**立刻恢复**。
+
+**根因**：luna_pinyin 的 `engine.filters` 里有 `simplifier`，但整条继承链
+（`shared/luna_pinyin.schema.yaml` stub → `pinyin.yaml` → `default.yaml`）
+**都没有 `simplifier:` 配置段**，于是 `simplifier/opencc_config` 是空的。
+
+librime 的 `Simplifier::Apply` 是全部答案：
+
+```cpp
+an<Translation> Simplifier::Apply(an<Translation> translation, CandidateList* candidates) {
+  if (!engine_->context()->get_option(option_name_)) return translation;  // 简繁关 → 放行
+  if (!opencc_) return translation;                                      // opencc 空 → 放行
+  return New<SimplifiedTranslation>(translation, this);                   // 否则走转换
+}
+```
+
+`opencc_` 实例其实**非空**（组件系统造了一个），但它的 `config_path_` 是空的
+→ `opencc::Config::NewFromFile("")` 抛异常 → **整条 translation 失败 → 零候选**。
+
+**修法**：把 upstream Rime 本来就有的那段补进 schema custom 文件。
+
+```yaml
+# luna_pinyin.custom.yaml
+simplifier/opencc_config: t2s.json       # t2s = 繁→简；luna 输出繁体，靠这一条转
+simplifier/option_name: simplification
+simplifier/tips: all
+
+# luna_pinyin_simp.custom.yaml（它自带 option_name: zh_simp）
+simplifier/opencc_config: t2s.json
+```
+
+**判定过程**（这个方法值得复用）——三步二分：
+
+| 步骤 | 结果 | 排除了什么 |
+|---|---|---|
+| 把 userdb 挪开再试 | 仍零候选 | 用户词典 / leveldb |
+| 切到「笔画」(stroke，table_translator 另一条线) | **有候选** | 引擎、部署、键盘都没问题 → 问题只在 luna 这条线 |
+| 回 luna 把简繁切成「繁体」 | **有候选** | 锁定 `simplifier` —— 整条流水线里唯一依赖外部数据的部件 |
+
+另外顺手把 `shared/opencc/` 的 46 个文件复制进了用户目录 `opencc/`
+（那里原本是空的），把「解析器只在用户目录找」这个变量也消掉了。
+
+### 六、↻ 部署**不会**重建 schema；也不要手改 `build/` 产物
+
+**事实一**：把 `build/luna_pinyin.schema.yaml` 删掉之后点 ↻，`build/` 的 mtime
+纹丝不动——**一个文件都没重建**。所以「从外部强制重建 schema」基本做不到。
+（`Rime.deploy()` 走的是 `startRime(true)`，名义上是完整部署，但 schema 那一段没跑。）
+
+**事实二**：`<id>.custom.yaml` 是**运行时**生效的。Rime 的 `Config::Open` 会自动去读
+`<config_id>.custom.yaml` 并应用它的 `patch:`，所以标点映射、开关状态名、simplifier
+配置这些改动，**文件推上去 + Rime 重新载入就够了，不需要重建 schema**。
+
+推论：`fix_punctuator.py`（曾经用它手改 `build/*.schema.yaml`）**从一开始就是错的设计**：
+
+- **多余**：custom 文件已经覆盖了同样的内容
+- **有害**：`adb push` 进去的文件带着**过期的 `__build_info`**，会让部署器误判
+  「没变化」而跳过；而且部署器似乎会把这个 build 文件当成重建的输入源，
+  于是一份有问题的文件会被反复喂进去
+- 我一度据此判断「schema 文件坏了」并把它删掉，结果连预编辑都没了，白折腾一轮部署
+
+现在那个脚本已经删掉，换成只读的 **`check.py`**（核对本地/手机是否一致 +
+报告部署状态，不做任何写入）。**不要再手改 `build/` 下的任何东西。**
+
+> 遗留：`build/luna_pinyin.schema.yaml` 与 `luna_pinyin_simp.schema.yaml` 目前
+> 是当初手工推回去的那两份（带着过期的 `__build_info`）。功能上没问题——
+> 它们的内容是对的，而且 custom 文件会在运行时把同样的值再应用一遍——
+> 但如果将来要一份「部署器原生」的干净产物，只能重装同文。
 
 ## 键盘（26 键，4 行）
 
@@ -522,9 +593,16 @@ patch:
   取消注释即可——但新方案如果要修标点，得再配一份 `<schema>.custom.yaml`。
 - **每次改完都要在手机上重新部署**，否则 `build/` 不更新，前台看不到变化。
 
-## 部署后怎么验证（离线/在机）
+## 部署后怎么验证
 
-同文把合并结果写进 `files/rime/build/`，用它反查：
+**先用 `check.py`**（只读，核对本地/手机是否一致，并报告部署状态）：
+
+```bash
+python3 check.py            # 全量
+python3 check.py --quiet    # 只说不一致的地方（deploy.sh 已经带上了）
+```
+
+想手工反查同文把主题合并成了什么，可以看 `files/rime/build/trime.yaml`：
 
 ```bash
 R=/sdcard/Android/data/com.osfans.trime/files/rime
@@ -533,15 +611,18 @@ R=/sdcard/Android/data/com.osfans.trime/files/rime
 adb shell head -6 $R/build/trime.yaml
 
 # 我们的标记
-adb shell grep -c '暗·26鍵' $R/build/trime.yaml     # 期望 2（default + qwerty）
+adb shell grep -c '暗·26键' $R/build/trime.yaml     # 期望 2（default + qwerty）
 
 # 关键：兄弟节点有没有被误伤
-adb shell sed -n '/^preset_keyboards:/,/^preset_keys:/p' $R/build/trime.yaml | grep -cE '^  [a-z_0-9]+:'   # 期望 18
+adb shell sed -n '/^preset_keyboards:/,/^preset_keys:/p' $R/build/trime.yaml | grep -cE '^  [a-z_0-9]+:'   # 期望 19
 adb shell sed -n '/^style:/,/^[a-z]/p' $R/build/trime.yaml | grep -cE '^  [a-z_0-9]+:'                    # 期望 44
 
-# 标点修正是否进了 schema
+# 标点修正（注意：它现在由 *.custom.yaml 在运行时应用，不是靠 build 产物）
 adb shell "sed -n '/^punctuator:/,/^recognizer:/p' $R/build/luna_pinyin.schema.yaml | grep -E '^    _:'"  # 期望 {commit: "_"}
 ```
+
+> `build/*.schema.yaml` 的可信度有限——部署器不会重建它（见「坑 六」），
+> 所以标点/开关/simplifier 这些改动的**源头在 `*.custom.yaml`**，看 custom 文件更准。
 
 截图测量键盘几何（需要 PIL 或 ffmpeg）：
 

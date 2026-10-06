@@ -26,6 +26,10 @@ for f in $FILES; do
 done
 
 echo
-echo "推送完成。现在去手机上操作："
+echo "推送完成，核对一遍："
+python3 "$SRC/check.py" --quiet || true
+
+echo
+echo "现在去手机上操作："
 echo "  1. 打开同文 App -> 主题 -> 选中「預設」"
 echo "  2. 同文 App 右上角 -> ↻ 圆形箭头（Deploy / 部署）"

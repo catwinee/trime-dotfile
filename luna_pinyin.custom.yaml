@@ -19,6 +19,21 @@
 
 patch:
 
+  # ---- simplifier / OpenCC 配置（**这条不补就会整个方案零候选**）----
+  #  同文自带的 luna_pinyin.schema.yaml stub 里，engine.filters 列了 simplifier，
+  #  但**整条继承链（stub / pinyin.yaml / default.yaml）都没有 simplifier: 配置段**，
+  #  也就是 simplifier/opencc_config 是空的。
+  #
+  #  librime 的 simplifier 此时仍然会构造一个非空 opencc_ 实例，然后在
+  #  opencc::Config::NewFromFile("") 上抛异常 → 整条 translation 失败 → 一个字都出不来。
+  #  现象：简繁开关为「简体」时零候选；切成「繁体」立刻恢复（那时 Apply 直接放行）。
+  #
+  #  下面补上 upstream Rime 里本来就有的值。
+  #  （t2s = Traditional → Simplified；对于 luna_pinyin，方案输出繁体，靠这个转简体）
+  simplifier/opencc_config: t2s.json
+  simplifier/option_name: simplification
+  simplifier/tips: all
+
   # ---- full_shape ----
   "punctuator/full_shape/@": {commit: "@"}
   "punctuator/full_shape/#": {commit: "#"}

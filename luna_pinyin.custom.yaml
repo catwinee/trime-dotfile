@@ -1,0 +1,64 @@
+# ============================================================================
+#  Rime 标点映射修正 —— luna_pinyin
+# ----------------------------------------------------------------------------
+#  同文/Rime 默认标点表会把下列 ASCII 符号转成全角或其它字符，例如：
+#      _  -> ——      @  -> ＠      *  -> ＊      (  -> （
+#      '  -> ‘’      "  -> “”      |  -> ·       \  -> 、
+#      /  -> ／/、    ?  -> ？      ;  -> ；      :  -> ：
+#  于是键盘角标写着 _，上滑却打出破折号——所见与所得不一致。
+#
+#  下面把这 20 个符号在 full_shape / half_shape 两张表里都改成
+#  「原样提交」，角标和输出就对齐了。其余标点行为不受影响。
+#
+#  必须写在 schema 级的 custom 文件里：标点表是 luna_pinyin.schema.yaml 自带的，
+#  default.custom.yaml 改不到它。luna_pinyin 和 luna_pinyin_simp 各要一份。
+#
+#  注意 . 和 ，没有被改动 —— 主键盘那个「。，」键的点击就是靠标点表把 . 转成 。
+#  的（这是中文标点输入的正路），上滑的 , 才是字面半角。
+# ============================================================================
+
+patch:
+
+  # ---- full_shape ----
+  "punctuator/full_shape/@": {commit: "@"}
+  "punctuator/full_shape/#": {commit: "#"}
+  "punctuator/full_shape/$": {commit: "$"}
+  "punctuator/full_shape/%": {commit: "%"}
+  "punctuator/full_shape/&": {commit: "&"}
+  "punctuator/full_shape/-": {commit: "-"}
+  "punctuator/full_shape/_": {commit: "_"}
+  "punctuator/full_shape/+": {commit: "+"}
+  "punctuator/full_shape/=": {commit: "="}
+  "punctuator/full_shape/*": {commit: "*"}
+  "punctuator/full_shape/(": {commit: "("}
+  "punctuator/full_shape/)": {commit: ")"}
+  "punctuator/full_shape/'": {commit: "'"}
+  "punctuator/full_shape/\"": {commit: "\""}
+  "punctuator/full_shape/|": {commit: "|"}
+  "punctuator/full_shape/\\": {commit: "\\"}
+  "punctuator/full_shape//": {commit: "/"}
+  "punctuator/full_shape/?": {commit: "?"}
+  "punctuator/full_shape/;": {commit: ";"}
+  "punctuator/full_shape/:": {commit: ":"}
+
+  # ---- half_shape ----
+  "punctuator/half_shape/@": {commit: "@"}
+  "punctuator/half_shape/#": {commit: "#"}
+  "punctuator/half_shape/$": {commit: "$"}
+  "punctuator/half_shape/%": {commit: "%"}
+  "punctuator/half_shape/&": {commit: "&"}
+  "punctuator/half_shape/-": {commit: "-"}
+  "punctuator/half_shape/_": {commit: "_"}
+  "punctuator/half_shape/+": {commit: "+"}
+  "punctuator/half_shape/=": {commit: "="}
+  "punctuator/half_shape/*": {commit: "*"}
+  "punctuator/half_shape/(": {commit: "("}
+  "punctuator/half_shape/)": {commit: ")"}
+  "punctuator/half_shape/'": {commit: "'"}
+  "punctuator/half_shape/\"": {commit: "\""}
+  "punctuator/half_shape/|": {commit: "|"}
+  "punctuator/half_shape/\\": {commit: "\\"}
+  "punctuator/half_shape//": {commit: "/"}
+  "punctuator/half_shape/?": {commit: "?"}
+  "punctuator/half_shape/;": {commit: ";"}
+  "punctuator/half_shape/:": {commit: ":"}

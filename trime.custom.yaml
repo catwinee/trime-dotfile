@@ -1,0 +1,714 @@
+# ============================================================================
+#  同文輸入法（Trime）自定义配置 —— 手写，从零开始
+#  目标：26 键 + 下滑大写 + 上滑数字/符号 + 纯暗色 + 工具栏
+# ----------------------------------------------------------------------------
+#  手机上的路径：
+#    /sdcard/Android/data/com.osfans.trime/files/rime/trime.custom.yaml
+#
+#  【重要】同文/Rime 的 patch 语义
+#  --------------------------------------------------------------------------
+#  patch 不是「深合并」，而是「把目标路径上的节点整块换掉」。所以：
+#
+#    * 键要写成完整路径，例如 preset_keyboards/default。
+#      若写成嵌套的
+#          patch:
+#            preset_keyboards:
+#              default: ...
+#      路径就停在 preset_keyboards，会把同文自带的 18 副键盘
+#      （symbols / number / letter / …）全部冲掉，键盘直接变空白。
+#    * 被替换的节点里原有字段会一起消失，所以重写键盘时
+#      width / height / lock / ascii_mode 必须自己补全。
+#      width 缺了，同文算不出按键尺寸，键盘就是一片空白。
+#
+#  配套文件
+#    default.custom.yaml          方案列表
+#    luna_pinyin.custom.yaml      标点映射修正（让上滑符号不被转成全角）
+#    luna_pinyin_simp.custom.yaml 同上，给简化字方案
+# ============================================================================
+
+patch:
+
+  # ==========================================================================
+  #  1. 主键盘 —— 26 键
+  # ==========================================================================
+  #
+  #  布局（宽度单位是屏宽的百分比，每行加起来正好 100）
+  #
+  #      q w e r t y u i o p             10 x 10 = 100
+  #      空5  a s d f g h j k l  空5       5 + 90 + 5 = 100
+  #      符号(15) z x c v b n m  BackSpace(15)  15 + 70 + 15 = 100
+  #      123(10) 中英(10) 。，(10) 空格(40) /(10) 回车(20) = 100
+  #
+  #  相比上一版的变化
+  #    * Shift 删掉了 —— 下滑已经能出大写，Shift 完全冗余
+  #    * 「符号」键从底行移到第 3 行左端（百度 26 键的做法）：
+  #      填满 Shift 让出的 15，同时让 z..m 在 15..85 之间居中，左右对称
+  #    * BackSpace 回到 15（上一版 25 太胖）
+  #    * "," 和 "." 合并成一个键：点击出 。  /  上滑出 ，
+  #    * 底行空格加宽到 40，两侧各 30，整体居中
+  #    * 长按只保留 a / x / c / v 的全选、剪切、复制、粘贴
+  #
+  #  手势
+  #      点击       输入该字母（中文模式走拼音，英文模式直接上屏）
+  #      上滑       第1行 = 1..0   第2行 = @ # $ % & - _ + =   第3行 = * ( ) ' " | \
+  #      下滑       该字母的大写，直接上屏（写法见下）
+  #      长按       a=全选  x=剪切  c=复制  v=粘贴，其余键无长按
+  #      左右滑     a s 是 ←→ 与行首行尾，h j 是 [ ] { }
+  #
+  #  下滑为什么写成 {commit: 'Q', label: 'Q'} 而不直接写 'Q'
+  #    直接写 'Q' 会被 Rime 的 recognizer 接住：
+  #        recognizer/patterns/uppercase: "[A-Z][-_+.'0-9A-Za-z]*$"
+  #        命中后 recognizer.cc 会 ctx->PushInput(ch)，于是大写字母进 composition，
+  #        要再按空格才上屏 —— 不是「直接输入」。
+  #    改 recognizer 那条规则也不行：大写会落给 express_editor 的 DirectCommit，
+  #    而它是 { ctx->Commit(); return kRejected; }，只提交 composition、不插入这个字符，
+  #    然后 Trime 把 kRejected 当「已处理」而丢弃，结果什么都不发生。
+  #    所以用内联 {commit: ...} 绕开 Rime，让 Trime 直接 ic.commitText()。
+  #    label 是为了滑动预览气泡：气泡取该 action 的 label，而内联 token 没有 code，
+  #    不给 label 就没有可显示的文字。（按键主字不受影响，它取 click 的标签。）
+  #    注意气泡默认不出现 —— showPopupPreview 第一句就是 if (!popupOnKeyPress) return，
+  #    这个开关（同文 -> Virtual Keyboard -> 按键时弹出显示字符）默认关闭。
+  #
+  #  label_symbol 是按键左上角的角标文字。同文默认会把 long_click 的值
+  #  当角标画（预设 {click: q, long_click: '!'} 就是这么显示 "!" 的），
+  #  所以必须显式指定 label_symbol = 上滑字符，角标才只反映上滑。
+  #
+  #  同文里 default（預設40鍵）和 qwerty（預設26鍵）是两个不同的键盘 id，
+  #  两个都覆盖成同一份 keys，省得手动切。keys 用 YAML 锚点定义一次。
+  # --------------------------------------------------------------------------
+
+  preset_keyboards/default:
+    name: 暗·26键
+    author: Catwine
+    ascii_mode: 0
+    width: 10        # 按键默认宽度 = 屏宽的 10%  <-- 缺了这行键盘会变成空白
+    height: 44       # 按键默认高度
+    lock: true       # 切换应用时记住这副键盘
+    keys: &dark26_keys
+
+      # ---- 第 1 行：上滑 = 数字，下滑 = 大写 --------------------------------
+      - {click: 'q', label_symbol: '1', swipe_up: '1', swipe_down: {commit: 'Q', label: 'Q'}}
+      - {click: 'w', label_symbol: '2', swipe_up: '2', swipe_down: {commit: 'W', label: 'W'}}
+      - {click: 'e', label_symbol: '3', swipe_up: '3', swipe_down: {commit: 'E', label: 'E'}}
+      - {click: 'r', label_symbol: '4', swipe_up: '4', swipe_down: {commit: 'R', label: 'R'}}
+      - {click: 't', label_symbol: '5', swipe_up: '5', swipe_down: {commit: 'T', label: 'T'}}
+      - {click: 'y', label_symbol: '6', swipe_up: '6', swipe_down: {commit: 'Y', label: 'Y'}}
+      - {click: 'u', label_symbol: '7', swipe_up: '7', swipe_down: {commit: 'U', label: 'U'}}
+      - {click: 'i', label_symbol: '8', swipe_up: '8', swipe_down: {commit: 'I', label: 'I'}}
+      - {click: 'o', label_symbol: '9', swipe_up: '9', swipe_down: {commit: 'O', label: 'O'}}
+      - {click: 'p', label_symbol: '0', swipe_up: '0', swipe_down: {commit: 'P', label: 'P'}}
+
+      # ---- 第 2 行：上滑 = 常用符号，下滑 = 大写 ----------------------------
+      - {width: 5}
+      - {click: 'a', long_click: select_all, label_symbol: '@', swipe_up: '@', swipe_down: {commit: 'A', label: 'A'}, swipe_left: Left, swipe_right: Right}
+      - {click: 's', label_symbol: '#', swipe_up: '#', swipe_down: {commit: 'S', label: 'S'}, swipe_left: Home, swipe_right: End}
+      - {click: 'd', label_symbol: '$', swipe_up: '$', swipe_down: {commit: 'D', label: 'D'}}
+      - {click: 'f', label_symbol: '%', swipe_up: '%', swipe_down: {commit: 'F', label: 'F'}}
+      - {click: 'g', label_symbol: '&', swipe_up: '&', swipe_down: {commit: 'G', label: 'G'}}
+      - {click: 'h', label_symbol: '-', swipe_up: '-', swipe_down: {commit: 'H', label: 'H'}, swipe_left: '[', swipe_right: ']'}
+      - {click: 'j', label_symbol: '_', swipe_up: '_', swipe_down: {commit: 'J', label: 'J'}, swipe_left: '{', swipe_right: '}'}
+      - {click: 'k', label_symbol: '+', swipe_up: '+', swipe_down: {commit: 'K', label: 'K'}}
+      - {click: 'l', label_symbol: '=', swipe_up: '=', swipe_down: {commit: 'L', label: 'L'}}
+      - {width: 5}
+
+      # ---- 第 3 行：上滑 = 剩余符号，下滑 = 大写 ----------------------------
+      # 左端放「符号」键（百度 26 键的做法）：既填满 Shift 让出的 15，
+      # 又让 z..m 这 7 个键在 15..85 之间居中，和上一行对齐。
+      # 上滑 = liquid_keyboard_switch（「更多」面板，即 liquid_keyboard 的 tabs 页）。
+      - {click: Keyboard_symbols, label_symbol: '更多', swipe_up: liquid_keyboard_switch, width: 15}
+      - {click: 'z', label_symbol: '*', swipe_up: '*', swipe_down: {commit: 'Z', label: 'Z'}}
+      - {click: 'x', long_click: cut, label_symbol: '(', swipe_up: '(', swipe_down: {commit: 'X', label: 'X'}}
+      # ⚠️ c 的长按 = copy（Control+c）。实测本机 Android 14 上 copy 写不进剪贴板，
+      #    详见 preset_keys/copy_via_cut 处的说明。先保留原语，备用方案已写好。
+      - {click: 'c', long_click: copy, label_symbol: ')', swipe_up: ')', swipe_down: {commit: 'C', label: 'C'}}
+      - {click: 'v', long_click: paste, label_symbol: "'", swipe_up: "'", swipe_down: {commit: 'V', label: 'V'}}
+      - {click: 'b', label_symbol: '"', swipe_up: '"', swipe_down: {commit: 'B', label: 'B'}}
+      - {click: 'n', label_symbol: '|', swipe_up: '|', swipe_down: {commit: 'N', label: 'N'}}
+      - {click: 'm', label_symbol: "\\", swipe_up: "\\", swipe_down: {commit: 'M', label: 'M'}}
+      # BackSpace
+      #   上滑 = Clear（预设键，text: "{Control+a}{BackSpace}"）= 全选并删除，
+      #      清掉输入框里的全部内容。注意它依赖同文的「拦截 Ctrl+A」开关，
+      #      默认是关的（AppPrefs.kt:333 hookCtrlA = false），不开就等于只敲了
+      #      一个退格。开启位置：同文 -> Virtual Keyboard -> Hook Ctrl+A
+      #   左滑 = Escape（放弃当前拼音串，不动已上屏的文字）。
+      #      两个动作已经不同了（不再是重复），所以都留着；不想要左滑就说一声。
+      - {click: BackSpace, label_symbol: '清空', swipe_left: Escape, swipe_up: Clear, width: 15}
+
+      # ---- 第 4 行：功能键（左右各 30，中间空格 40，居中）-----------------
+      # 顺序：数字　中英　。，　空格　／　回车
+      #   中英紧挨数字；。，和 ／ 分列空格两侧（。，在左，／在右）
+      - {click: Keyboard_number, width: 10}                               # 数字键盘
+      - {click: Mode_switch, width: 10}                                   # 中/英切换
+      - {click: '.', label: '。', ascii: '.', label_symbol: ',', swipe_up: ',', width: 10}
+      # 空格：上下左右四个手势
+      #   上/下滑 → Up / Down：有候选时选上/下一个候选（selector 的 Horizontal|Stacked 绑定），
+      #                        无候选时是光标上下
+      #   左/右滑 → Left / Right：光标左右移（selector 在横排下不绑左右，会落到 navigator）
+      #   翻页交给 , / . （key_binder 的 paging_with_comma_period）
+      - {click: space, label: ' ', swipe_left: Left, swipe_right: Right, swipe_up: Up, swipe_down: Down, width: 40}
+      - {click: '/', label_symbol: '?', swipe_up: '?', width: 10}
+      # 回车：长按原来是 CommitComment（上屏候选注释，角标写「编码」），已按要求去掉
+      # 回车：composing 时显示 Enter；长按原来是 CommitComment（上屏候选注释，角标写「编码」），已按要求去掉
+      - {click: Return, composing: Return1, width: 20}
+
+  # 同文里另一副预设键盘 qwerty（預設26鍵），指向同一份 keys。
+  # columns / key_*_offset_* 沿用原定义一起写全，免得被整块替换时丢掉。
+  preset_keyboards/qwerty:
+    name: 暗·26键
+    author: Catwine
+    ascii_mode: 0
+    columns: 10
+    width: 10
+    height: 55
+    lock: true
+    key_symbol_offset_x: 0
+    key_symbol_offset_y: 0
+    key_text_offset_x: 0
+    key_text_offset_y: 0
+    key_hint_offset_x: 0
+    key_hint_offset_y: 0
+    key_press_offset_x: 2
+    key_press_offset_y: 2
+    keys: *dark26_keys
+
+  # ==========================================================================
+  #  1b. 符号键盘（按「符号」键切过去的那一副）
+  # ==========================================================================
+  #  同文提供的 symbols 键盘原本是：
+  #    * 40 个符号格（4 行 x 10）+ 一行功能键
+  #    * 变体都放在 long_click 里（如 ( 长按出 {、[ 长按出 【…）
+  #    * 底行宽度 10+15+10+10+30+10+10+15 = 110，本身就会折行
+  #
+  #  这里改成：
+  #    * 符号格的 long_click 全部改成 swipe_up，并显式写上 label_symbol
+  #      —— 同文的角标默认画就是 long_click 的值，long_click 一删角标就没了，
+  #      所以必须用 label_symbol 把“变体”继续标在角上，只是现在对应上滑。
+  #    * 底行重排为正好 100，删掉【迷你】【更多】，腾出的位置给空格；
+  #      空格宽度 40，与中文键盘一致，且不带文字。
+  #    * 空格两侧放 。， 和 /，定义与中文键盘完全相同。
+  #    * 取消 退格 / 返回 / 数字 / 完成 四个功能键的长按。
+  #
+  #  【例外】格子里的 / 、， 、？ 三键按你的要求“先不要管”，
+  #    保留了原来的 long_click（/ 是 √，另两个是单手键盘开关）。
+  # ==========================================================================
+  preset_keyboards/symbols:
+    name: 符号
+    author: Catwine
+    ascii_mode: 1
+    width: 10
+    height: 44
+    keys:
+      # ---- 第 1 行：数字 ----
+      - {click: '1'}
+      - {click: '2'}
+      - {click: '3'}
+      - {click: '4'}
+      - {click: '5'}
+      - {click: '6'}
+      - {click: '7'}
+      - {click: '8'}
+      - {click: '9'}
+      - {click: '0'}
+
+      # ---- 第 2 行 ----
+      - {click: '~', label_symbol: '`', swipe_up: '`'}
+      - {click: '!'}
+      - {click: '@'}
+      - {click: '#'}
+      - {click: '$'}
+      - {click: '￥'}
+      - {click: '%'}
+      - {click: '^'}
+      - {click: '&'}
+      - {click: '*'}
+
+      # ---- 第 3 行 ----
+      - {click: '(', label_symbol: '{', swipe_up: '{'}
+      - {click: ')', label_symbol: '}', swipe_up: '}'}
+      - {click: '[', label_symbol: '【', swipe_up: '【'}
+      - {click: ']', label_symbol: '】', swipe_up: '】'}
+      - {click: '「', label_symbol: '『', swipe_up: '『'}
+      - {click: '」', label_symbol: '』', swipe_up: '』'}
+      - {click: '、', ascii: "\\", label_symbol: '|', swipe_up: '|'}
+      - {click: '/', long_click: '√'}          # ← 按你的要求暂不修改
+      - {click: ':'}
+      - {click: ';'}
+
+      # ---- 第 4 行 ----
+      - {click: '+'}
+      - {click: '-', label_symbol: '_', swipe_up: '_'}
+      - {click: '='}
+      - {click: '〈', ascii: '<', label_symbol: '《', swipe_up: '《'}
+      - {click: '〉', ascii: '>', label_symbol: '》', swipe_up: '》'}
+      - {click: '“', ascii: '"', label_symbol: '‘', swipe_up: '‘'}
+      - {click: '”', ascii: "'", label_symbol: '’', swipe_up: '’'}
+      - {click: '，', ascii: ',', long_click: one_hand_switch_1}   # ← 暂不修改
+      - {click: '？', ascii: '?', long_click: one_hand_switch_3}   # ← 暂不修改
+
+      # ---- 第 5 行：功能键 ------------------------------------------------
+      #   符号格共 39 个键（不是 40），所以退格会被挤到第 4 行末尾 ——
+      #   这和同文原版的行为一致，不动它。
+      #   本行剩 6 个键：返回10 + 数字10 + 。，10 + 空格50 + /10 + 完成10 = 100
+      #   删掉【迷你】【更多】和原来那个单独的【。】腾出的位置全给了空格。
+      #   四个功能键（退格/返回/数字/完成）的长按已全部取消。
+      - {click: BackSpace, width: 10}
+      - {click: Keyboard_default, width: 10}                # 返回字母键盘
+      - {click: Keyboard_number, width: 10}                 # 数字键盘
+      - {click: '.', label: '。', ascii: '.', label_symbol: ',', swipe_up: ',', width: 10}
+      - {click: space, label: ' ', swipe_left: Left, swipe_right: Right, swipe_up: Up, swipe_down: Down, width: 50}
+      - {click: '/', label_symbol: '?', swipe_up: '?', width: 10}
+      - {click: Return, width: 10}
+
+  # ==========================================================================
+  #  1c. 光标编辑键盘（工具栏 `ic@cursor_text` 按钮切过去的那一副）
+  # ==========================================================================
+  #  5 列 x 4 行，每键宽 20，正好 100。
+  #  方向键排成十字（第 1~2 行的第 2~4 列）。
+  #  全部用 trime.yaml 自带的预设键，不依赖同文风主题里的 Left1 / Shift_L2 之类。
+  # ==========================================================================
+  preset_keyboards/editor:
+    name: 光标编辑
+    author: Catwine
+    ascii_mode: 1
+    width: 20
+    height: 44
+    keys:
+      #           ↆ 中列是方向键十字
+      - {click: select_all}
+      - {click: Home}
+      - {click: Up}
+      - {click: End}
+      - {click: Page_Up}
+
+      - {click: cut}
+      - {click: Left}
+      - {click: Down}
+      - {click: Right}
+      - {click: Page_Down}
+
+      - {click: copy}
+      - {click: Delete}
+      - {click: BackSpace}
+      - {click: undo}
+      - {click: redo}
+
+      - {click: paste}
+      - {click: Escape}
+      - {click: Keyboard_symbols}
+      - {click: Mode_switch}
+      - {click: Keyboard_back}
+
+  # ==========================================================================
+  #  2. 配色：纯暗色
+  # ==========================================================================
+  #  写法 0xAARRGGBB（8 位十六进制，前两位不透明度）。
+  #  0x00000000 = 全透明，用来把边框、阴影抹掉。
+  #  替换的是预设配色里那个叫 default 的方案，同文默认选中的就是它。
+  #  整块替换，所以下面把原 default 方案的每个键都重写了一遍。
+  # --------------------------------------------------------------------------
+
+  preset_color_schemes/default:
+    name: 纯暗／Pure Dark
+    author: Catwine
+
+    # ---- 键盘主体 ----
+    keyboard_back_color: 0xff000000       # 键盘底色：纯黑
+    root_background: 0xff000000           # 键盘区 + 候选栏 + 工具栏 整块底
+    key_back_color: 0xff1a1a1e            # 普通按键底
+    key_text_color: 0xffe8e8ec            # 按键主字（字母）
+    key_symbol_color: 0xff8b8b94          # 按键角标 / 符号
+    key_border_color: 0x00000000          # 无边框
+    label_color: 0xff7c7c86               # 键位小标签
+    shadow_color: 0x00000000              # 无阴影
+
+    # ---- 按下 / 开关状态 ----
+    hilited_key_back_color: 0xff31313a    # 按下反馈
+    hilited_key_text_color: 0xffffffff
+    hilited_key_symbol_color: 0xffffffff
+    preview_back_color: 0xff31313a        # 按下时的放大提示框
+    preview_text_color: 0xffffffff
+
+    off_key_back_color: 0xff1a1a1e        # 开关键「关」态
+    off_key_text_color: 0xff8b8b94
+    on_key_back_color: 0xff2f6fd0         # 开关键「开」态：蓝
+    on_key_text_color: 0xffffffff
+    hilited_off_key_back_color: 0xff31313a
+    hilited_off_key_text_color: 0xffffffff
+    hilited_on_key_back_color: 0xff3d80e6
+    hilited_on_key_text_color: 0xffffffff
+
+    # ---- 候选栏 ----
+    back_color: 0xff0a0a0c                # 候选栏背景
+    candidate_background: 0xff0a0a0c
+    candidate_text_color: 0xffd5d5db      # 候选字
+    border_color: 0xff2a2a30
+    candidate_separator_color: 0xff2a2a30
+    comment_text_color: 0xff6f6f79        # 候选注释
+    hilited_candidate_back_color: 0xff2f6fd0    # 选中候选底：蓝
+    hilited_candidate_text_color: 0xffffffff
+    hilited_label_color: 0xffcfe0ff
+    hilited_comment_text_color: 0xffb9d4ff
+
+    # ---- 编码区（拼音串）----
+    text_back_color: 0xff15151a
+    text_color: 0xffe8e8ec
+    hilited_text_color: 0xff5aa9ff
+    hilited_back_color: 0xff23232a
+
+    # ---- 工具栏按钮（点按高亮）----
+    hilited_candidate_button_color: 0xff2f6fd0
+
+    # ---- 其它 ----
+    long_text_back_color: 0xff1a1a1e      # 剪贴板长文本按键
+
+  # ==========================================================================
+  #  3. 工具栏 + 相关预设键（候选栏上方那一排：⋯ / 光标 / 剪贴板 / 表情 / 撤销 / 重做 / 收起键盘）
+  # ==========================================================================
+  #  trime.yaml 原版没有 tool_bar 这一段，所以工具栏默认是关的。
+  #  这里补上就打开了。配置格式参考同文自带的「标准」主题。
+  #
+  #  说明
+  #    action            = 单击触发，取值是 preset_keys 里的名字，或内建命令
+  #    long_press_action = 长按触发
+  #    style: "ic@xxx"   = 同文内建图标（Iconics，会自动跟随配色着色）
+  #    foreground.option_styles = [关态, 开态] 两个文字/图标，随 toggle 切换
+  #    normal            = 前景色，这里引用配色里的键名（candidate_text_color 等）
+  #
+  #  已去掉原「标准」主题里的 Keyboard_editor 按钮：它要选一副叫 editor 的
+  #  键盘，而 trime.yaml（預設主题）并没有这副键盘，留着会点出空白。
+  # --------------------------------------------------------------------------
+
+  tool_bar:
+    button_spacing: 5                # 按钮间距
+    button_font: iconfont.ttf        # 按钮字体
+    back_style: "ic@arrow-left"      # 左侧返回按钮样式
+
+    # 左侧主按钮：点按 = 方案菜单，长按 = 设置
+    #
+    # 【重要】action 里的字符串是按「预设键名」解析的
+    #   Theme.resolveAction(String) -> KeyActionToken.Plain(name) -> 查 theme.presetKeys
+    #   查不到就会当成字面文本发送。
+    #   同文自带 trime.yaml 里没有 menu_keyboard 这个预设键（只有同文风主题才有），
+    #   所以必须自己补一条，否则点这个按钮会直接把 "menu_keyboard" 这串字打出来。
+    primary_button:
+      background:
+        type: circle
+        corner_radius: 10
+        normal: 0x00                 # 0x00 = 透明
+        highlight: hilited_candidate_button_color
+        vertical_inset: 4
+        horizontal_inset: 4
+      foreground:
+        style: "ic@dots_horizontal"
+        normal: candidate_text_color
+        padding: 10
+      action: menu_keyboard
+      long_press_action: Settings
+
+    # 右侧按钮列表（从右往左排）
+    #   已按要求去掉中英（Mode_switch）和半/全角（Zenkaku_Hankaku）两个按钮：
+    #   中英切换在键盘底行「数字」旁边，全角可在「方案」菜单里切。
+    #
+    #   ⚠️ 列表顺序和屏幕顺序是**反的**：
+    #     * buttons[0] 不会进中间那排，它被单独放到最右端（和「收起键盘」互斥）
+    #     * buttons[1..] 用 FlexDirection.ROW_REVERSE 排，所以列表里靠后的反而在左边
+    #   当前列表： hide, redo, undo, emoji, clipboard, editor
+    #   屏幕效果： ⋯ | ⌶ 📋 🙂 ↶ ↷ | ⌨
+    #   （想让撤销/重做换到左边，把这两行往列表末尾挪即可。）
+    buttons:
+      - foreground: {style: "ic@keyboard_close", normal: candidate_text_color}
+        action: Hide                      # 收起键盘（buttons[0] → 最右端）
+      - foreground: {style: "ic@redo"}
+        action: redo_via_y                # 重做（预设的 redo 是死的，见上）
+      - foreground: {style: "ic@undo"}
+        action: undo                      # 撤销
+      - foreground: {style: "ic@emoticon"}
+        action: liquid_keyboard_emoji     # 表情
+      - foreground: {style: "ic@clipboard"}
+        action: clipboard_window          # 剪贴板
+      - foreground: {style: "ic@cursor_text"}
+        action: Keyboard_editor           # 光标移动 / 编辑面板
+
+  # 工具栏和预设键里会引用到的内建命令，缺一个就会退化成字面文本
+  preset_keys/menu_keyboard: {label: 菜单, send: FUNCTION, command: menu_keyboard}
+
+  # ---- 重做 ----
+  #  同文预设里的 redo 是 {send: Control+Shift+z}，**它是死的**。
+  #  hookKeyboard 第一句就是硬门槛：
+  #      if (mask != KeyEvent.META_CTRL_ON) return false
+  #  带 Shift 的 mask 是 CTRL|SHIFT，不等于 META_CTRL_ON → 直接返回 false，
+  #  键交给 Rime（key_binder 没绑 Control+Shift+z）→ 被丢弃。
+  #
+  #  而 hookKeyboard 里面对 KEYCODE_Y 是绑了 redo 的
+  #  （if hookCtrlZY: KEYCODE_Y -> performContextMenuAction(redo)），
+  #  所以正确的发法是 Control+y。
+  #  （undo 不受影响，它的 mask 就是纯 Ctrl。）
+  preset_keys/redo_via_y: {label: 重做, send: Control+y}
+
+
+  # ---- 复制 ----
+  #  【目前不可用】c 的长按用的是预设键 copy（Control+c）。实测（Honor 60 /
+  #  Android 14 / 同文 3.3.12）：Control+a / x / v / z 都正常，只有 Control+c
+  #  不往剪贴板写东西（选完区长按 c 后再粘贴，粘不出东西）。
+  #
+  #  原因：copy 和 cut 走的是同一个 performContextMenuAction()，同文源码里
+  #  两个分支的判定条件逐字相同，所以差异在 Android 侧。可疑点：同文在两个
+  #  地方都在 Ctrl+C 之后立刻取消选区，而 Ctrl+X 之后没有：
+  #     ① hookKeyboard 的 C 分支：if (result) clearTextSelection()
+  #     ② Rime 按键回吐路径 TrimeInputMethodService.kt:246：
+  #        if (it.modifiers.ctrl && keyCode == KEYCODE_C) clearTextSelection()
+  #  很可能是“取消选区”跑在了“写剪贴板”前面。属同文实现问题，trime.yaml 改不了。
+  #
+  #  备用方案（已验证可用，但默认不用）：把 c 的长按改成 copy_via_cut，
+  #  用剪切 + 撤销把选区写进剪贴板再把文本恢复回去：
+  #      - {click: 'c', long_click: copy_via_cut, ...}
+  #  副作用：没有选区时 Control+x 会被丢弃，但 Control+z 仍会执行
+  #  → 会撤销上一步编辑（redo 可恢复）。
+  preset_keys/copy_via_cut: {label: 复制, text: "{Control+x}{Control+z}"}
+
+  # ---- 光标编辑键盘的入口（预设主题 trime.yaml 里没有，得自己定义）----
+  preset_keys/Keyboard_editor: {label: 光标, send: Eisu_toggle, select: editor}
+  # 返回：用 .last 回到“上一副键盘”，比 .default(smartMatch) 更符合直觉
+  preset_keys/Keyboard_back: {label: 返回, send: Eisu_toggle, select: .last}
+
+  # ==========================================================================
+  #  4. style 微调
+  # ==========================================================================
+  #  每一项都写成 style/xxx 的叶子路径，只替换那一项，
+  #  同文原 style 里的其它 40 多项不会被冲掉。
+  # --------------------------------------------------------------------------
+
+  style/horizontal_gap: 4         # 键与键的横向间距（预设 1，纯黑底上太挤）
+  style/vertical_gap: 4           # 行距（预设 1）
+  style/round_corner: 10          # 按键圆角（预设 8）
+  style/shadow_radius: 0.0        # 不要立体阴影，走扁平
+  style/key_text_size: 22         # 字母字号
+  style/candidate_text_size: 20   # 候选字号
+
+  # 键盘总高（按键区高度，4 行会被等比缩放填满它）。
+  # 预设 250，这里降到 230：按键略矮一点，但比 250 还是宽松。
+  # 注意：这个值**不能**消掉屏幕最下方那块空白 ——
+  #   实测 Honor 60（1080x2400, density 480, 1dp = 3px）：
+  #     IME 窗口 = (0,90)-(1080,2400) 全屏，但
+  #     GestureNavBottom = (0,2280)-(1080,2400) = 120px
+  #     键盘内容 bottom-align 在 y=2280，也就是导航条上沿。
+  #   那 120px 是 InputMethodService 的 decor 在
+  #   decorFitsSystemWindows=true（默认）下从 content 区裁掉的，
+  #   Trime 没有关掉它，源码里 prefs 和 theme 两层都没有对应开关。
+  #   调大这个值只会让键盘整体变高，空白不变。
+  style/keyboard_height: 230
+
+  # 同文会读这一项来决定默认配色。若你的同文版本忽略它，
+  # 就手动去 同文 -> 配色 里选「纯暗／Pure Dark」，效果一样。
+  style/color_scheme: default
+
+  # ==========================================================================
+  #  5. 界面文字全部改为简体
+  # ==========================================================================
+  #  同文预设键的标签是繁体（數字／符號／編碼／…），键盘显示名也是。
+  #  下面逐条覆盖成简体，用 opencc 的 t2s 生成，只列真正有变化的（共 60 条）。
+  #  Henkan（简繁切换）的 states 原本是 [漢字, 汉字]，转简体后两边会一样，
+  #  所以手动改成 [繁体, 简体]。
+  # ==========================================================================
+
+  preset_keys/BackToPreviousSyllable/label: "删音节"
+  preset_keys/CALCULATOR/label: "计算机"
+  preset_keys/CALENDAR/label: "日历"
+  preset_keys/CONTACTS/label: "电话簿"
+  preset_keys/Candidate_switch/states: ["有候选", "无候选"]
+  preset_keys/Charset_switch/states: ["常用", "增广"]
+  preset_keys/ChineseDate/label: "农历"
+  preset_keys/Comment_switch/states: ["有注释", "无注释"]
+  preset_keys/CommitComment/label: "编码"
+  preset_keys/CommitHomepage/label: "同文网址"
+  preset_keys/CommitRawInput/label: "编码"
+  preset_keys/CommitScriptText/label: "编码"
+  preset_keys/Delete/label: "删除"
+  preset_keys/DeleteCandidate/label: "删词"
+  preset_keys/EXPLORER/label: "浏览器"
+  preset_keys/F4/label: "方案选单"
+  preset_keys/Help/label: "说明"
+  preset_keys/Henkan/states: ["繁体", "简体"]
+  preset_keys/Hide/label: "隐藏"
+  preset_keys/Hint_switch/states: ["有助记", "无助记"]
+  preset_keys/Homepage/label: "同文主页"
+  preset_keys/IME_last/label: "上一输入法"
+  preset_keys/IME_next/label: "下一输入法"
+  preset_keys/Info/label: "关于"
+  preset_keys/Keyboard_number/label: "数字"
+  preset_keys/Keyboard_switch/label: "键盘"
+  preset_keys/Keyboard_symbols/label: "符号"
+  preset_keys/MUSIC/label: "音乐"
+  preset_keys/POWER/label: "电源"
+  preset_keys/Page_Down/label: "下页"
+  preset_keys/Page_Up/label: "上页"
+  preset_keys/SEARCH/label: "搜寻"
+  preset_keys/Settings/label: "设定"
+  preset_keys/Theme_settings/label: "主题"
+  preset_keys/Time/label: "时间"
+  preset_keys/TrimeCmp/label: "同文组件"
+  preset_keys/VOICE_ASSIST/label: "语音"
+  preset_keys/VOLUME_MUTE/label: "静音"
+  preset_keys/WebSearch/label: "搜索网页"
+  preset_keys/Wiki/label: "维基"
+  preset_keys/Zdic/label: "汉典"
+  preset_keys/Zdic2/label: "汉典"
+  preset_keys/copy/label: "复制"
+  preset_keys/copy_all/label: "全誊"
+  preset_keys/paste/label: "贴上"
+  preset_keys/paste_text/label: "贴上文本"
+  preset_keys/select_all/label: "全选"
+  preset_keys/undo/label: "撤销"
+  preset_keyboards/array30/name: "行列30配美式国际"
+  preset_keyboards/bopomofo/name: "注音键盘"
+  preset_keyboards/cangjie5/name: "仓颉五代键盘"
+  preset_keyboards/cangjie6/name: "仓颉六代"
+  preset_keyboards/number/name: "预设数字"
+  preset_keyboards/qwerty0/name: "预设36键"
+  preset_keyboards/qwerty_/name: "预设30键"
+  preset_keyboards/stroke/name: "五笔画键盘"
+  preset_keyboards/symbols/name: "符号"
+  preset_keyboards/telegraph/name: "电码"
+  preset_keyboards/terra_pinyin/name: "地球拼音键盘"
+  preset_keyboards/us_intl/name: "美式国际"
+
+
+  # ==========================================================================
+  #  6. 空格键：去掉文字 + 加上下左右手势
+  # ==========================================================================
+  #  【文字】同文只在按键自身没写 label 时才把方案名画到空格上
+  #  （KeyAction.kt:158: code==SPACE && label.isEmpty() → schemaName）。
+  #  PresetKey 模型里确实有 label 字段，所以改 preset_keys/space 一处，
+  #  所有用 {click: space} 的键盘（number / letter / qwerty0 / bopomofo /
+  #  cangjie5 / stroke / … 共 15 副）一起生效。
+  #  （space1 那个键没有任何键盘在用，不用管。）
+  # ==========================================================================
+
+  preset_keys/space/label: " "
+
+  # --------------------------------------------------------------------------
+  #  【手势】PresetKey 模型里没有 swipe 字段，所以手势只能逐个键盘写在键上。
+  #  这里补 number（数字面板）和 letter（英文面板）；
+  #  中英文主键盘 default/qwerty 和符号面板 symbols 写在前面第 1 节的键定义里。
+  #
+  #  为什么用方向键：
+  #    librime 的 selector 在候选态用 Horizontal | Stacked 那套绑定
+  #    （selector.cc:33 / 129）：
+  #        Up  -> 上一个候选      Down -> 下一个候选
+  #        PgUp -> 上一页         PgDn -> 下一页
+  #        左右**不绑定** -> 落到 navigator（编码串内移动）
+  #    所以上/下滑在"有候选"时选候选、"无候选"时是光标上下；
+  #    左/右滑始终是光标左右。翻页交给 , / .（key_binder 的
+  #    paging_with_comma_period）。
+  #  ------------------------------------------------------------------------
+  #  注意：letter 的键位原本来自 __include: /preset_keyboards/default，
+  #  而 __include 在 patch 之前就解析完了，所以这里用 ref 里原版 default
+  #  的键位当基线（带原版的 40 键布局，不是我们现在这版 26 键）。
+  #  --------------------------------------------------------------------------
+
+  # --------------------------------------------------------------------------
+  #  letter（英文面板）的完整键位
+  #  --------------------------------------------------------------------------
+  #  为什么要把整份 keys 抄一遍：它原本是
+  #      __include: /preset_keyboards/default
+  #  而 __include 在 patch 之前就解析完了，所以 patch preset_keyboards/default
+  #  传不到它身上。这里用 ref/ 里原版 default 的 40 键当基线，只改空格那一个键
+  #  （去文字 + 四向手势），其余保持同文原样。
+  #
+  #  ⚠️ 因此它仍是原版的 40 键布局，连全套原版长按都在（数字键出符号、a 全选、
+  #     x 剪切、回车「编码」……），和主键盘那副 26 键完全不一致。
+  #     要统一就得在这里把 keys 整体重写，别指望改 default 能带过来。
+  # --------------------------------------------------------------------------
+  preset_keyboards/letter/keys:
+    - {click: '1', long_click: '!'}
+    - {click: '2', long_click: '@'}
+    - {click: '3', long_click: '#'}
+    - {click: '4', long_click: $}
+    - {click: '5', long_click: '%'}
+    - {click: '6', long_click: ^}
+    - {click: '7', long_click: '&'}
+    - {click: '8', long_click: '*'}
+    - {click: '9', long_click: (}
+    - {click: '0', long_click: )}
+    - {click: q, long_click: _}
+    - {click: w, long_click: '-'}
+    - {click: e, long_click: +}
+    - {click: r, long_click: '='}
+    - {click: t, long_click: '|'}
+    - {click: y, long_click: \}
+    - {click: u, long_click: '['}
+    - {click: i, long_click: ']'}
+    - {click: o, long_click: '{'}
+    - {click: p, long_click: '}'}
+    - {click: a, long_click: select_all}
+    - {click: s, long_click: Home}
+    - {click: d, long_click: End}
+    - {click: f, long_click: Page_Up}
+    - {click: g, long_click: Page_Down}
+    - {click: h, long_click: Left}
+    - {click: j, long_click: Down}
+    - {click: k, long_click: Up}
+    - {click: l, long_click: Right}
+    - {click: ;, long_click: ':'}
+    - {click: z, long_click: '`'}
+    - {click: x, long_click: cut}
+    - {click: c, long_click: copy}
+    - {click: v, long_click: paste}
+    - {click: b, long_click: '~'}
+    - {click: n, long_click: Insert}
+    - {click: m, long_click: Delete}
+    - {click: ',', long_click: <}
+    - {click: ., long_click: '>'}
+    - {click: /, long_click: '?'}
+    - {click: Shift_L}
+    - {click: Keyboard_symbols, long_click: Keyboard_number}
+    - {click: Mode_switch, long_click: Menu}
+    - {click: space, label: ' ', swipe_left: Left, swipe_right: Right, swipe_up: Up, swipe_down: Down, width: 30}
+    - {click: '''', long_click: '"'}
+    - {click: BackSpace, width: 15}
+    - {click: Return, composing: Return1, long_click: CommitComment, width: 15}
+
+  # --------------------------------------------------------------------------
+  #  number（数字面板）的完整键位
+  #  --------------------------------------------------------------------------
+  #  累积到现在的改动（相对同文原版）：
+  #    [0]  +           ->  = 上滑 +
+  #    [5]  -           ->  - 上滑 _
+  #    [4]  #           ->  # 上滑 %
+  #    [9]  %           ->  ¥ 上滑 $        （人民币符号）
+  #    [10] *           ->  * 上滑 /
+  #    [14] :           ->  : 上滑 ;
+  #    [18] .           ->  √ 上滑 ²
+  #    [19] ,           ->  退格 上滑 清空
+  #    原 [20] 的 =      ->  移除
+  #    底行重排          ->  返回(10) .，(10) 空格(50) /(10) 回车(20) = 100
+  #                          返回放在最左、宽 10，与主键盘「123」键同位同宽
+  #    空格              ->  label 去掉方案名 + 四向手势
+  #  这里一个长按都没有（原版「返回」上那个跳符号面板的长按也已去掉）。
+  # --------------------------------------------------------------------------
+  preset_keyboards/number/keys:
+    - {click: '=', label_symbol: +, swipe_up: +}
+    - {click: KP_1}
+    - {click: KP_2}
+    - {click: KP_3}
+    - {click: '#', label_symbol: '%', swipe_up: '%'}
+    - {click: '-', label_symbol: _, swipe_up: _}
+    - {click: KP_4}
+    - {click: KP_5}
+    - {click: KP_6}
+    - {click: ¥, label_symbol: $, swipe_up: $}
+    - {click: '*', label_symbol: /, swipe_up: /}
+    - {click: KP_7}
+    - {click: KP_8}
+    - {click: KP_9}
+    - {click: ':', label_symbol: ;, swipe_up: ;}
+    - {click: /}
+    - {click: ±}
+    - {click: KP_0}
+    - {click: √, label_symbol: ², swipe_up: ²}
+    - {click: BackSpace, label_symbol: 清空, swipe_up: Clear}
+    - {click: Keyboard_default, width: 10}
+    - {click: ., label_symbol: ',', swipe_up: ',', width: 10}
+    - {click: space, label: ' ', swipe_left: Left, swipe_right: Right, swipe_up: Up, swipe_down: Down, width: 50}
+    - {click: /, label_symbol: '?', swipe_up: '?', width: 10}
+    - {click: Return, width: 20}

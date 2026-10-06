@@ -1,0 +1,14 @@
+# Git 忽略
+#
+#  backup/  —— deploy.sh 每次推送前都会把手机上的旧文件拉到 backup/<时间戳>/，
+#              会无限增长，而且里面任何一份都能从 ref/ 与 git 历史里推出来。
+#              手机上的原始 default.custom.yaml 已经存在 ref/default.custom.yaml 里了。
+#
+#  __pycache__/ —— 跑 fix_punctuator.py 时 Python 生成的字节码缓存。
+#
+#  pic/  —— 设计参考截图（同文标准主题、语燕输入法），只作本地对照，不入库。
+
+backup/
+__pycache__/
+*.pyc
+pic/

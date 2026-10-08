@@ -45,9 +45,11 @@ patch:
   #      填满 Shift 让出的 15，同时让 z..m 在 15..85 之间居中，左右对称
   #    * BackSpace 回到 15（上一版 25 太胖）
   #    * "," 和 "." 合并成一个键：点击 ,（中文出 ，）  /  上滑 .（中文出 。）
-  #      角标显示上滑字符。主键盘的角标写「。」（中文句号），
-  #      符号/数字面板保持半角「.」——同一颗键在两处的输出其实一样
-  #      （都走 Rime 标点表），差别只是提示写法。
+  #      角标是纯字符串（Key.kt: symbolLabel = labelSymbol.ifEmpty { ... }），
+  #      **不感知中西文模式**；而主键盘在中英切换时不换键盘（ascii_keyboard
+  #      只用于 App 强制 ASCII / 密码框那种 .ascii 场景），所以角标只能二选一。
+  #      当前取半角「.」：西文下完全正确，中文下与实际输出「。」只差全/半角。
+  #      想反过来就在本文件里把这一行的 label_symbol 改成 '。'。
   #    * 底行空格加宽到 40，两侧各 30，整体居中
   #    * 长按只保留 a / x / c / v 的全选、剪切、复制、粘贴
   #
@@ -142,7 +144,7 @@ patch:
       #   中英紧挨数字；。，和 ／ 分列空格两侧（。，在左，／在右）
       - {click: Keyboard_number, width: 10}                               # 数字键盘
       - {click: Mode_switch, width: 10}                                   # 中/英切换
-      - {click: ',', label: '，', ascii: ',', label_symbol: '。', swipe_up: '.', width: 10}
+      - {click: ',', label: '，', ascii: ',', label_symbol: '.', swipe_up: '.', width: 10}
       # 空格：上下左右四个手势
       #   上/下滑 → Up / Down：有候选时选上/下一个候选（selector 的 Horizontal|Stacked 绑定），
       #                        无候选时是光标上下
